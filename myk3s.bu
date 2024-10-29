@@ -1,0 +1,116 @@
+variant: fcos
+version: 1.5.0
+passwd:
+ users:
+   - name: admin
+     groups: ["wheel", "sudo"]
+     password_hash: "$6$Ggs7FDErrtgkgea3$eij7SNyitZjFQ4molXGok5Eco8noRLIHPvAtIyKv7nDv5LaAMoHyLJAuYazIErwekKbsTmNjzwD2riVXH14kO0"
+systemd:
+ units:
+   - name: "rpm-ostree-install-k3s-dependencies.service"
+     enabled: true
+     contents: |
+       [Unit]
+       Description=Install k3s dependencies
+       Wants=network-online.target
+       After=network-online.target
+       Before=zincati.service
+
+       [Service]
+       Type=oneshot
+       RemainAfterExit=yes
+       ExecStart=rpm-ostree install --apply-live --allow-inactive --assumeyes k3s-selinux helm
+
+       [Install]
+       WantedBy=multi-user.target
+   - name: "k3s.service"
+     enabled: true
+     contents: |
+       [Unit]
+       Description=Run K3s
+       Wants=network-online.target
+       After=network-online.target rpm-ostree-install-k3s-dependencies.service
+
+       [Service]
+       Type=notify
+       EnvironmentFile=-/etc/default/%N
+       EnvironmentFile=-/etc/sysconfig/%N
+       EnvironmentFile=-/etc/systemd/system/%N.env
+       KillMode=process
+       Delegate=yes
+       LimitNOFILE=1048576
+       LimitNPROC=infinity
+       LimitCORE=infinity
+       TasksMax=infinity
+       TimeoutStartSec=0
+       Restart=always
+       RestartSec=5s
+       ExecStartPre=-/sbin/modprobe br_netfilter
+       ExecStartPre=-/sbin/modprobe overlay
+       ExecStart=/usr/local/bin/k3s server --kubelet-arg="config=/etc/rancher/k3s/kubelet.config"
+       ExecStartPost=/usr/bin/bash -c '/usr/sbin/semodule -v -e k3s && restorecon -Rv /var /etc /usr'
+
+       [Install]
+       WantedBy=multi-user.target
+storage:
+ disks:
+   - device: /dev/disk/by-id/coreos-boot-disk
+     wipe_table: false
+     partitions:
+     - number: 4
+       label: root
+       size_mib: 8192
+       resize: true
+     - label: var  # not specifying "number", so this will go after the root partition
+       size_mib: 0 # means "use the rest of the space on the disk"
+ filesystems:
+   - path: /var
+     device: /dev/disk/by-partlabel/var
+     format: xfs
+     wipe_filesystem: false # preserve /var on reinstall (this is the default, but be explicit)
+     with_mount_unit: true  # mount this filesystem in the real root
+ files:
+   - path: /etc/rancher/k3s/config.yaml
+     mode: 0644
+     contents:
+       inline: |
+         cluster-init: true
+         disable:
+           - servicelb
+           - traefik
+         disable-kube-proxy: true
+         disable-network-policy: true
+         flannel-backend: none
+         selinux: true
+         write-kubeconfig-mode: "0644"
+   - path: /etc/ssh/sshd_config.d/20-enable-passwords.conf
+     mode: 0644
+     contents:
+       inline: |
+         PasswordAuthentication yes
+   - path: /etc/yum.repos.d/rancher-k3s-common.repo
+     mode: 0644
+     contents:
+       inline: |
+         [rancher-k3s-common-stable]
+         name=Rancher K3s Common (stable)
+         baseurl=https://rpm.rancher.io/k3s/stable/common/coreos/noarch/
+         enabled=1
+         gpgcheck=1
+         repo_gpgcheck=0
+         gpgkey=https://rpm.rancher.io/public.key
+   - path: /usr/local/bin/k3s
+     overwrite: true
+     mode: 0755
+     contents:
+       source: "https://github.com/k3s-io/k3s/releases/download/v1.30.2%2Bk3s2/k3s"
+       verification:
+         hash: "sha256-3b7f74edcc9b4a7649426b6816a7d3d6d76ddf742384ac63b86ee66e230de758"
+   - path: /etc/rancher/k3s/kubelet.config
+     mode: 0644
+     contents:
+       inline: |
+         apiVersion: kubelet.config.k8s.io/v1beta1
+         kind: KubeletConfiguration
+         shutdownGracePeriod: 60s
+         shutdownGracePeriodCriticalPods: 10s
