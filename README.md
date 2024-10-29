@@ -38,6 +38,8 @@ virt-install --connect="qemu:///system" --name="${VM_NAME}" --vcpus="${VCPUS}" -
 Install cni plugin
 
 ```
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
 helm repo add cilium https://helm.cilium.io
 helm install mycilium cilium/cilium --set ipam.operator.clusterPoolIPv4PodCIDRList="10.0.0.0/8" --set ipam.operator.clusterPoolIPv4MaskSize=24 --set kubeProxyReplacement=true --set operator.replicas=1 --set envoy.enabled=false --set k8sServicePort=6443 --set k8sServiceHost=127.0.0.1 
 
